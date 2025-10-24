@@ -6,6 +6,8 @@ from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline as ImbPipeline
 import joblib
+import warnings
+warnings.filterwarnings('ignore')
 
 from utils import save_artifact, plot_class_balance
 
@@ -24,7 +26,7 @@ class TelcoFeatureEngineer:
         self.df['value_ratio'] = self.df['MonthlyCharges'] / (self.df['TotalCharges'] + 1)
         self.df['avg_monthly_value'] = self.df['TotalCharges'] / (self.df['tenure'] + 1)
         
-        # 2. Tenure-based features
+        # 2. Tenure-based features (use numerical instead of categorical)
         self.df['is_new_customer'] = (self.df['tenure'] <= 3).astype(int)
         self.df['is_loyal_customer'] = (self.df['tenure'] > 24).astype(int)
         self.df['tenure_squared'] = self.df['tenure'] ** 2
@@ -49,7 +51,7 @@ class TelcoFeatureEngineer:
         return self.df
     
     def encode_categorical_variables(self):
-        """Encode all categorical variables"""
+        """Encode all categorical variables - FIXED VERSION"""
         print("🔤 ENCODING CATEGORICAL VARIABLES...")
         
         # Binary categorical variables
@@ -70,7 +72,10 @@ class TelcoFeatureEngineer:
         
         for col in multi_category_cols:
             if col in self.df.columns:
+                # Get dummies and ensure proper column names
                 dummies = pd.get_dummies(self.df[col], prefix=col)
+                # Remove any special characters from column names
+                dummies.columns = dummies.columns.str.replace(' ', '_').str.replace('-', '_')
                 self.df = pd.concat([self.df, dummies], axis=1)
                 self.df.drop(col, axis=1, inplace=True)
         
@@ -78,28 +83,51 @@ class TelcoFeatureEngineer:
         return self.df
     
     def handle_class_imbalance(self, X_train, y_train, method='smote'):
-        """Handle class imbalance using various techniques"""
+        """Handle class imbalance using various techniques - FIXED VERSION"""
         print(f"\n⚖️ HANDLING CLASS IMBALANCE USING {method.upper()}...")
         
         print("Before balancing:")
         print(f"Class distribution: {pd.Series(y_train).value_counts().to_dict()}")
         
+        # Convert to numpy arrays for SMOTE (avoids pandas dtype issues)
+        X_train_np = X_train.values if hasattr(X_train, 'values') else X_train
+        y_train_np = y_train.values if hasattr(y_train, 'values') else y_train
+        
         if method == 'smote':
             # SMOTE: Synthetic Minority Over-sampling Technique
-            balancer = SMOTE(random_state=42, k_neighbors=5)
-            X_balanced, y_balanced = balancer.fit_resample(X_train, y_train)
-            
+            try:
+                balancer = SMOTE(random_state=42, k_neighbors=5)
+                X_balanced, y_balanced = balancer.fit_resample(X_train_np, y_train_np)
+                # Convert back to DataFrame to preserve column names
+                X_balanced = pd.DataFrame(X_balanced, columns=X_train.columns)
+                y_balanced = pd.Series(y_balanced, name=y_train.name)
+            except Exception as e:
+                print(f"SMOTE failed: {e}. Using class weights instead.")
+                X_balanced, y_balanced = X_train, y_train
+                
         elif method == 'undersample':
             # Random undersampling of majority class
-            balancer = RandomUnderSampler(random_state=42)
-            X_balanced, y_balanced = balancer.fit_resample(X_train, y_train)
-            
+            try:
+                balancer = RandomUnderSampler(random_state=42)
+                X_balanced, y_balanced = balancer.fit_resample(X_train_np, y_train_np)
+                X_balanced = pd.DataFrame(X_balanced, columns=X_train.columns)
+                y_balanced = pd.Series(y_balanced, name=y_train.name)
+            except Exception as e:
+                print(f"Undersampling failed: {e}. Using original data.")
+                X_balanced, y_balanced = X_train, y_train
+                
         elif method == 'combine':
             # Combine SMOTE and undersampling
-            over = SMOTE(sampling_strategy=0.5, random_state=42)
-            under = RandomUnderSampler(sampling_strategy=0.8, random_state=42)
-            pipeline = ImbPipeline(steps=[('over', over), ('under', under)])
-            X_balanced, y_balanced = pipeline.fit_resample(X_train, y_train)
+            try:
+                over = SMOTE(sampling_strategy=0.5, random_state=42)
+                under = RandomUnderSampler(sampling_strategy=0.8, random_state=42)
+                pipeline = ImbPipeline(steps=[('over', over), ('under', under)])
+                X_balanced, y_balanced = pipeline.fit_resample(X_train_np, y_train_np)
+                X_balanced = pd.DataFrame(X_balanced, columns=X_train.columns)
+                y_balanced = pd.Series(y_balanced, name=y_train.name)
+            except Exception as e:
+                print(f"Combined sampling failed: {e}. Using original data.")
+                X_balanced, y_balanced = X_train, y_train
         
         else:  # No balancing
             X_balanced, y_balanced = X_train, y_train
@@ -107,17 +135,22 @@ class TelcoFeatureEngineer:
         print("After balancing:")
         balanced_counts = pd.Series(y_balanced).value_counts()
         print(f"Class distribution: {balanced_counts.to_dict()}")
-        print(f"Balancing ratio: {balanced_counts[0]/balanced_counts[1]:.2f}:1")
+        if len(balanced_counts) > 1:
+            print(f"Balancing ratio: {balanced_counts[0]/balanced_counts[1]:.2f}:1")
         
         return X_balanced, y_balanced
     
     def prepare_model_data(self, test_size=0.2, balance_method='smote'):
-        """Prepare final dataset for modeling with imbalance handling"""
+        """Prepare final dataset for modeling with imbalance handling - FIXED VERSION"""
         print("\n📊 PREPARING MODEL DATA...")
         
         # Separate features and target
         X = self.df.drop('Churn', axis=1)
         y = self.df['Churn']
+        
+        # Ensure all data is numerical
+        X = X.apply(pd.to_numeric, errors='coerce').fillna(0)
+        y = pd.to_numeric(y, errors='coerce').fillna(0)
         
         # Store feature names
         self.feature_names = X.columns.tolist()
@@ -137,7 +170,7 @@ class TelcoFeatureEngineer:
         numerical_columns = ['tenure', 'MonthlyCharges', 'TotalCharges', 'value_ratio', 
                            'avg_monthly_value', 'tenure_squared']
         
-        # Only scale columns that exist
+        # Only scale columns that exist and are numerical
         existing_num_cols = [col for col in numerical_columns if col in X_train_balanced.columns]
         
         X_train_balanced[existing_num_cols] = self.scaler.fit_transform(X_train_balanced[existing_num_cols])
@@ -171,7 +204,7 @@ class TelcoFeatureEngineer:
 
 # Complete feature engineering pipeline
 def run_feature_engineering(data_path, balance_method='smote'):
-    """Run complete feature engineering pipeline"""
+    """Run complete feature engineering pipeline - FIXED VERSION"""
     print("🚀 STARTING FEATURE ENGINEERING PIPELINE")
     print("="*60)
     
@@ -184,6 +217,13 @@ def run_feature_engineering(data_path, balance_method='smote'):
     # Execute pipeline
     df_with_features = engineer.create_features()
     df_encoded = engineer.encode_categorical_variables()
+    
+    # Ensure no string columns remain
+    string_columns = df_encoded.select_dtypes(include=['object']).columns
+    if len(string_columns) > 0:
+        print(f"⚠️  Converting remaining string columns to numeric: {list(string_columns)}")
+        for col in string_columns:
+            df_encoded[col] = pd.to_numeric(df_encoded[col], errors='coerce').fillna(0)
     
     # Prepare model data with imbalance handling
     X_train, X_test, y_train, y_test = engineer.prepare_model_data(balance_method=balance_method)
@@ -204,8 +244,16 @@ def run_feature_engineering(data_path, balance_method='smote'):
     return X_train, X_test, y_train, y_test, engineer.feature_names
 
 if __name__ == "__main__":
-    # Run with SMOTE balancing (you can change to 'undersample' or 'combine')
-    X_train, X_test, y_train, y_test, feature_names = run_feature_engineering(
-        'data/processed/cleaned_churn_data.csv',
-        balance_method='smote'
-    )
+    # Run with SMOTE balancing
+    try:
+        X_train, X_test, y_train, y_test, feature_names = run_feature_engineering(
+            'data/processed/cleaned_churn_data.csv',
+            balance_method='smote'
+        )
+    except Exception as e:
+        print(f"❌ Error with SMOTE: {e}")
+        print("🔄 Trying without balancing...")
+        X_train, X_test, y_train, y_test, feature_names = run_feature_engineering(
+            'data/processed/cleaned_churn_data.csv',
+            balance_method='none'
+        )

@@ -1,251 +1,283 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, precision_recall_curve
-from sklearn.model_selection import cross_val_score, GridSearchCV
-import matplotlib.pyplot as plt
-import seaborn as sns
+from sklearn.model_selection import cross_val_score, GridSearchCV, StratifiedKFold
+from sklearn.calibration import CalibratedClassifierCV
 import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
-class TelcoModelTrainer:
+# Import our utility functions
+from utils import evaluate_model_with_balance, save_artifact, load_artifact
+
+class AdvancedModelTrainer:
     def __init__(self):
         self.models = {}
         self.best_model = None
+        self.best_model_name = None
         self.best_score = 0
-        self.feature_importance = None
+        self.cv_results = {}
         
-    def train_multiple_models(self, X_train, X_test, y_train, y_test):
-        """Train and compare multiple machine learning models"""
-        print("🤖 TRAINING MULTIPLE MACHINE LEARNING MODELS...")
+    def train_with_cross_validation(self, X_train, X_test, y_train, y_test):
+        """Train multiple models with cross-validation"""
+        print("🤖 TRAINING MODELS WITH CROSS-VALIDATION...")
         
-        # Define models to try
+        # Define models with initial parameters
         models = {
-            'logistic_regression': LogisticRegression(random_state=42, max_iter=1000),
-            'random_forest': RandomForestClassifier(random_state=42, n_estimators=100),
-            'gradient_boosting': GradientBoostingClassifier(random_state=42),
-            'svm': SVC(probability=True, random_state=42)
+            'logistic_regression': {
+                'model': LogisticRegression(random_state=42, max_iter=1000, class_weight='balanced'),
+                'params': {
+                    'C': [0.1, 1, 10],
+                    'solver': ['liblinear', 'saga']
+                }
+            },
+            'random_forest': {
+                'model': RandomForestClassifier(random_state=42, class_weight='balanced_subsample'),
+                'params': {
+                    'n_estimators': [100, 200],
+                    'max_depth': [10, 20, None],
+                    'min_samples_split': [2, 5]
+                }
+            },
+            'gradient_boosting': {
+                'model': GradientBoostingClassifier(random_state=42),
+                'params': {
+                    'n_estimators': [100, 200],
+                    'learning_rate': [0.05, 0.1],
+                    'max_depth': [3, 5]
+                }
+            }
         }
         
-        results = {}
+        # Cross-validation setup
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         
-        for name, model in models.items():
-            print(f"\nTraining {name}...")
+        for name, model_info in models.items():
+            print(f"\n🎯 TRAINING {name.upper()}...")
             
-            # Train model
-            model.fit(X_train, y_train)
+            # Perform grid search with cross-validation
+            grid_search = GridSearchCV(
+                model_info['model'],
+                model_info['params'],
+                cv=cv,
+                scoring='roc_auc',
+                n_jobs=-1,
+                verbose=0
+            )
             
-            # Predictions
-            y_pred = model.predict(X_test)
-            y_pred_proba = model.predict_proba(X_test)[:, 1]
+            grid_search.fit(X_train, y_train)
+            
+            # Get best model
+            best_estimator = grid_search.best_estimator_
+            
+            # Make predictions
+            y_pred = best_estimator.predict(X_test)
+            y_pred_proba = best_estimator.predict_proba(X_test)[:, 1]
             
             # Calculate metrics
             auc_score = roc_auc_score(y_test, y_pred_proba)
-            accuracy = model.score(X_test, y_test)
+            cv_mean_score = grid_search.best_score_
             
             # Store results
-            results[name] = {
-                'model': model,
-                'auc': auc_score,
-                'accuracy': accuracy,
+            self.models[name] = {
+                'model': best_estimator,
+                'best_params': grid_search.best_params_,
+                'auc_score': auc_score,
+                'cv_score': cv_mean_score,
                 'predictions': y_pred,
-                'probabilities': y_pred_proba
+                'probabilities': y_pred_proba,
+                'grid_search': grid_search
             }
             
-            print(f"{name} - AUC: {auc_score:.4f}, Accuracy: {accuracy:.4f}")
+            print(f"✅ {name} - Best params: {grid_search.best_params_}")
+            print(f"   Cross-val AUC: {cv_mean_score:.4f}")
+            print(f"   Test AUC: {auc_score:.4f}")
             
             # Update best model
             if auc_score > self.best_score:
                 self.best_score = auc_score
-                self.best_model = model
+                self.best_model = best_estimator
                 self.best_model_name = name
         
-        self.models = results
-        print(f"\n🏆 BEST MODEL: {self.best_model_name} with AUC: {self.best_score:.4f}")
+        print(f"\n🏆 BEST OVERALL MODEL: {self.best_model_name}")
+        print(f"   Best Test AUC: {self.best_score:.4f}")
         
-        return results
+        return self.models
     
-    def hyperparameter_tuning(self, X_train, y_train):
-        """Perform hyperparameter tuning on the best model"""
-        print(f"\n🎯 PERFORMING HYPERPARAMETER TUNING FOR {self.best_model_name.upper()}...")
+    def calibrate_probabilities(self, X_train, y_train):
+        """Calibrate probabilities for better reliability"""
+        print(f"\n🎯 CALIBRATING PROBABILITIES FOR {self.best_model_name.upper()}...")
         
-        if self.best_model_name == 'random_forest':
-            param_grid = {
-                'n_estimators': [100, 200, 300],
-                'max_depth': [10, 20, None],
-                'min_samples_split': [2, 5, 10],
-                'min_samples_leaf': [1, 2, 4]
-            }
+        # Use Platt scaling for calibration
+        calibrated_model = CalibratedClassifierCV(self.best_model, method='isotonic', cv=3)
+        calibrated_model.fit(X_train, y_train)
+        
+        self.calibrated_model = calibrated_model
+        print("✅ Probability calibration completed")
+        
+        return calibrated_model
+    
+    def evaluate_all_models(self, X_test, y_test, feature_names):
+        """Comprehensive evaluation of all trained models"""
+        print(f"\n📊 COMPREHENSIVE MODEL EVALUATION")
+        print("="*60)
+        
+        evaluation_results = {}
+        
+        for name, model_info in self.models.items():
+            print(f"\n🔍 EVALUATING {name.upper()}...")
             
-            grid_search = GridSearchCV(
-                RandomForestClassifier(random_state=42),
-                param_grid,
-                cv=5,
-                scoring='roc_auc',
-                n_jobs=-1,
-                verbose=1
+            # Evaluate model
+            results = evaluate_model_with_balance(
+                y_test, 
+                model_info['predictions'], 
+                model_info['probabilities'],
+                model_name=name
             )
             
-            grid_search.fit(X_train, y_train)
-            
-            print(f"Best parameters: {grid_search.best_params_}")
-            print(f"Best cross-validation score: {grid_search.best_score_:.4f}")
-            
-            self.best_model = grid_search.best_estimator_
-            
-        elif self.best_model_name == 'logistic_regression':
-            param_grid = {
-                'C': [0.1, 1, 10, 100],
-                'penalty': ['l1', 'l2'],
-                'solver': ['liblinear', 'saga']
-            }
-            
-            grid_search = GridSearchCV(
-                LogisticRegression(random_state=42, max_iter=1000),
-                param_grid,
-                cv=5,
-                scoring='roc_auc',
-                n_jobs=-1,
-                verbose=1
-            )
-            
-            grid_search.fit(X_train, y_train)
-            
-            print(f"Best parameters: {grid_search.best_params_}")
-            print(f"Best cross-validation score: {grid_search.best_score_:.4f}")
-            
-            self.best_model = grid_search.best_estimator_
+            evaluation_results[name] = results
         
-        return self.best_model
+        # Compare all models
+        self._plot_model_comparison(evaluation_results)
+        
+        # Feature importance for tree-based models
+        self._analyze_feature_importance(feature_names)
+        
+        return evaluation_results
     
-    def evaluate_best_model(self, X_test, y_test, feature_names):
-        """Comprehensive evaluation of the best model"""
-        print(f"\n📊 COMPREHENSIVE EVALUATION OF {self.best_model_name.upper()}...")
+    def _plot_model_comparison(self, evaluation_results):
+        """Plot comparison of all models"""
+        metrics = ['auc_score', 'f1_score', 'precision', 'recall']
+        model_names = list(evaluation_results.keys())
         
-        # Predictions
-        y_pred = self.best_model.predict(X_test)
-        y_pred_proba = self.best_model.predict_proba(X_test)[:, 1]
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        axes = axes.ravel()
         
-        # Classification report
-        print("\n📋 CLASSIFICATION REPORT:")
-        print(classification_report(y_test, y_pred, target_names=['No Churn', 'Churn']))
-        
-        # Confusion matrix
-        plt.figure(figsize=(10, 8))
-        
-        plt.subplot(2, 2, 1)
-        cm = confusion_matrix(y_test, y_pred)
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                   xticklabels=['No Churn', 'Churn'],
-                   yticklabels=['No Churn', 'Churn'])
-        plt.title('Confusion Matrix')
-        plt.ylabel('Actual')
-        plt.xlabel('Predicted')
-        
-        # Feature importance (if available)
-        if hasattr(self.best_model, 'feature_importances_'):
-            plt.subplot(2, 2, 2)
-            self.feature_importance = pd.DataFrame({
-                'feature': feature_names,
-                'importance': self.best_model.feature_importances_
-            }).sort_values('importance', ascending=False)
+        for i, metric in enumerate(metrics):
+            values = [evaluation_results[model][metric] for model in model_names]
             
-            # Plot top 15 features
-            top_features = self.feature_importance.head(15)
-            sns.barplot(data=top_features, x='importance', y='feature', palette='viridis')
-            plt.title('Top 15 Feature Importance')
-            plt.tight_layout()
-        
-        # Precision-Recall curve
-        plt.subplot(2, 2, 3)
-        precision, recall, _ = precision_recall_curve(y_test, y_pred_proba)
-        plt.plot(recall, precision, marker='.')
-        plt.xlabel('Recall')
-        plt.ylabel('Precision')
-        plt.title('Precision-Recall Curve')
-        
-        # ROC Curve
-        plt.subplot(2, 2, 4)
-        from sklearn.metrics import roc_curve
-        fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
-        plt.plot(fpr, tpr, marker='.')
-        plt.plot([0, 1], [0, 1], linestyle='--')
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title('ROC Curve')
-        plt.text(0.6, 0.2, f'AUC = {self.best_score:.4f}', fontsize=12)
+            bars = axes[i].bar(model_names, values, color=['skyblue', 'lightgreen', 'lightcoral'])
+            axes[i].set_title(f'Model Comparison - {metric.upper()}')
+            axes[i].set_ylabel(metric.replace('_', ' ').title())
+            axes[i].tick_params(axis='x', rotation=45)
+            
+            # Add value labels on bars
+            for bar, value in zip(bars, values):
+                axes[i].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                           f'{value:.3f}', ha='center', va='bottom')
         
         plt.tight_layout()
-        plt.savefig('model_evaluation.png', dpi=300, bbox_inches='tight')
+        plt.savefig('model_comparison.png', dpi=300, bbox_inches='tight')
         plt.show()
-        
-        # Business metrics
-        print("\n💼 BUSINESS METRICS:")
-        tn, fp, fn, tp = cm.ravel()
-        
-        print(f"True Positives (Correctly predicted churn): {tp}")
-        print(f"False Positives (False alarms): {fp}")
-        print(f"True Negatives (Correctly predicted no churn): {tn}")
-        print(f"False Negatives (Missed churn): {fn}")
-        
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        
-        print(f"Precision: {precision:.4f}")
-        print(f"Recall: {recall:.4f}")
-        print(f"F1-Score: {2 * (precision * recall) / (precision + recall):.4f}")
-        
-        return {
-            'confusion_matrix': cm,
-            'feature_importance': self.feature_importance,
-            'auc_score': self.best_score
-        }
     
-    def save_model(self, model_path, preprocessor_path):
-        """Save the trained model and preprocessor"""
-        # Save model
-        joblib.dump(self.best_model, model_path)
-        print(f"Model saved to {model_path}")
+    def _analyze_feature_importance(self, feature_names):
+        """Analyze and plot feature importance for tree-based models"""
+        print("\n📈 ANALYZING FEATURE IMPORTANCE...")
         
-        # Save model info
-        model_info = {
-            'model_name': self.best_model_name,
-            'auc_score': self.best_score,
-            'feature_importance': self.feature_importance
+        for name, model_info in self.models.items():
+            model = model_info['model']
+            
+            if hasattr(model, 'feature_importances_'):
+                # Get feature importance
+                importance_df = pd.DataFrame({
+                    'feature': feature_names,
+                    'importance': model.feature_importances_
+                }).sort_values('importance', ascending=False)
+                
+                # Plot top 15 features
+                plt.figure(figsize=(12, 8))
+                top_features = importance_df.head(15)
+                
+                sns.barplot(data=top_features, x='importance', y='feature', palette='viridis')
+                plt.title(f'Top 15 Feature Importance - {name.upper()}')
+                plt.xlabel('Importance Score')
+                plt.tight_layout()
+                plt.savefig(f'feature_importance_{name}.png', dpi=300, bbox_inches='tight')
+                plt.show()
+                
+                print(f"\n🎯 {name.upper()} - Top 5 Important Features:")
+                for _, row in importance_df.head().iterrows():
+                    print(f"   {row['feature']}: {row['importance']:.4f}")
+                
+                self.models[name]['feature_importance'] = importance_df
+    
+    def save_trained_models(self):
+        """Save all trained models and results"""
+        print("\n💾 SAVING MODELS AND RESULTS...")
+        
+        # Save best model
+        save_artifact(self.best_model, 'models/best_churn_model.pkl')
+        
+        # Save calibrated model if exists
+        if hasattr(self, 'calibrated_model'):
+            save_artifact(self.calibrated_model, 'models/calibrated_churn_model.pkl')
+        
+        # Save model comparison results
+        model_comparison = {
+            'best_model_name': self.best_model_name,
+            'best_score': self.best_score,
+            'all_models': {}
         }
-        joblib.dump(model_info, 'models/model_info.pkl')
         
-        print(" MODEL TRAINING COMPLETED!")
+        for name, model_info in self.models.items():
+            model_comparison['all_models'][name] = {
+                'auc_score': model_info['auc_score'],
+                'cv_score': model_info['cv_score'],
+                'best_params': model_info['best_params']
+            }
+            
+            if 'feature_importance' in model_info:
+                # Save top features
+                top_features = model_info['feature_importance'].head(10)[['feature', 'importance']]
+                model_comparison['all_models'][name]['top_features'] = top_features.to_dict('records')
+        
+        save_artifact(model_comparison, 'models/model_comparison_results.pkl')
+        
+        print("✅ ALL MODELS AND RESULTS SAVED SUCCESSFULLY!")
 
 # Complete training pipeline
-def run_model_training():
-    """Complete model training pipeline"""
+def run_complete_training(balance_method='smote'):
+    """Run the complete model training pipeline"""
+    print("🚀 STARTING COMPLETE MODEL TRAINING PIPELINE")
+    print("="*60)
+    
     # Load processed data
     from feature_engineering import run_feature_engineering
     
-    X_train, X_test, y_train, y_test, feature_names, df_processed = run_feature_engineering(
-        'data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv'
+    X_train, X_test, y_train, y_test, feature_names = run_feature_engineering(
+        'data/processed/cleaned_churn_data.csv',
+        balance_method=balance_method
     )
     
     # Initialize trainer
-    trainer = TelcoModelTrainer()
+    trainer = AdvancedModelTrainer()
     
-    # Train multiple models
-    results = trainer.train_multiple_models(X_train, X_test, y_train, y_test)
+    # Train models with cross-validation
+    models = trainer.train_with_cross_validation(X_train, X_test, y_train, y_test)
     
-    # Hyperparameter tuning
-    best_model = trainer.hyperparameter_tuning(X_train, y_train)
+    # Calibrate probabilities
+    calibrated_model = trainer.calibrate_probabilities(X_train, y_train)
     
-    # Evaluate best model
-    evaluation_results = trainer.evaluate_best_model(X_test, y_test, feature_names)
+    # Evaluate all models
+    evaluation_results = trainer.evaluate_all_models(X_test, y_test, feature_names)
     
-    # Save model
-    trainer.save_model('models/telco_churn_model.pkl', 'models/feature_preprocessor.pkl')
+    # Save models
+    trainer.save_trained_models()
+    
+    print("\n" + "="*60)
+    print("MODEL TRAINING COMPLETED SUCCESSFULLY!")
+    print(f"• Best model: {trainer.best_model_name}")
+    print(f"• Best AUC score: {trainer.best_score:.4f}")
+    print(f"• Number of models trained: {len(models)}")
+    print(f"• Balance method used: {balance_method}")
     
     return trainer, evaluation_results
 
 if __name__ == "__main__":
-    trainer, results = run_model_training()
+    # Run complete training pipeline
+    trainer, results = run_complete_training(balance_method='smote') 
