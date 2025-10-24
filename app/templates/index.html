@@ -7,14 +7,22 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        .risk-low { color: #198754; }
-        .risk-medium { color: #ffc107; }
-        .risk-high { color: #fd7e14; }
-        .risk-very-high { color: #dc3545; }
+        .risk-low { color: #198754; font-weight: bold; }
+        .risk-medium { color: #ffc107; font-weight: bold; }
+        .risk-high { color: #fd7e14; font-weight: bold; }
+        .risk-very-high { color: #dc3545; font-weight: bold; }
         .loading { display: none; }
         .feature-card { transition: transform 0.2s; }
         .feature-card:hover { transform: translateY(-2px); }
-        .recommendation-item { border-left: 4px solid #0d6efd; padding-left: 1rem; margin-bottom: 0.5rem; }
+        .recommendation-item { 
+            border-left: 4px solid #0d6efd; 
+            padding-left: 1rem; 
+            margin-bottom: 0.5rem;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 0 5px 5px 0;
+        }
+        .progress { height: 25px; }
     </style>
 </head>
 <body>
@@ -58,21 +66,21 @@
                                     <h6><i class="fas fa-user"></i> Personal Info</h6>
                                     <div class="mb-2">
                                         <label class="form-label">Tenure (months)*</label>
-                                        <input type="number" class="form-control" name="tenure" min="0" max="72" required>
+                                        <input type="number" class="form-control" name="tenure" min="0" max="72" value="12" required>
                                     </div>
                                     <div class="mb-2">
                                         <label class="form-label">Monthly Charges ($)*</label>
-                                        <input type="number" step="0.01" class="form-control" name="MonthlyCharges" min="0" max="200" required>
+                                        <input type="number" step="0.01" class="form-control" name="MonthlyCharges" min="0" max="200" value="70.35" required>
                                     </div>
                                     <div class="mb-2">
                                         <label class="form-label">Total Charges ($)*</label>
-                                        <input type="number" step="0.01" class="form-control" name="TotalCharges" min="0" max="10000" required>
+                                        <input type="number" step="0.01" class="form-control" name="TotalCharges" min="0" max="10000" value="844.20" required>
                                     </div>
                                     <div class="mb-2">
                                         <label class="form-label">Gender</label>
                                         <select class="form-select" name="gender" required>
                                             <option value="">Select...</option>
-                                            <option value="Male">Male</option>
+                                            <option value="Male" selected>Male</option>
                                             <option value="Female">Female</option>
                                         </select>
                                     </div>
@@ -85,7 +93,7 @@
                                         <label class="form-label">Contract</label>
                                         <select class="form-select" name="Contract" required>
                                             <option value="">Select...</option>
-                                            <option value="Month-to-month">Month-to-month</option>
+                                            <option value="Month-to-month" selected>Month-to-month</option>
                                             <option value="One year">One year</option>
                                             <option value="Two year">Two year</option>
                                         </select>
@@ -95,7 +103,7 @@
                                         <select class="form-select" name="InternetService" required>
                                             <option value="">Select...</option>
                                             <option value="DSL">DSL</option>
-                                            <option value="Fiber optic">Fiber optic</option>
+                                            <option value="Fiber optic" selected>Fiber optic</option>
                                             <option value="No">No</option>
                                         </select>
                                     </div>
@@ -103,7 +111,7 @@
                                         <label class="form-label">Payment Method</label>
                                         <select class="form-select" name="PaymentMethod" required>
                                             <option value="">Select...</option>
-                                            <option value="Electronic check">Electronic check</option>
+                                            <option value="Electronic check" selected>Electronic check</option>
                                             <option value="Mailed check">Mailed check</option>
                                             <option value="Bank transfer">Bank transfer</option>
                                             <option value="Credit card">Credit card</option>
@@ -113,7 +121,7 @@
                                         <label class="form-label">Paperless Billing</label>
                                         <select class="form-select" name="PaperlessBilling" required>
                                             <option value="">Select...</option>
-                                            <option value="Yes">Yes</option>
+                                            <option value="Yes" selected>Yes</option>
                                             <option value="No">No</option>
                                         </select>
                                     </div>
@@ -130,7 +138,7 @@
                                             <select class="form-select" name="OnlineSecurity" required>
                                                 <option value="">Select...</option>
                                                 <option value="Yes">Yes</option>
-                                                <option value="No">No</option>
+                                                <option value="No" selected>No</option>
                                                 <option value="No internet service">No internet service</option>
                                             </select>
                                         </div>
@@ -139,7 +147,7 @@
                                             <select class="form-select" name="TechSupport" required>
                                                 <option value="">Select...</option>
                                                 <option value="Yes">Yes</option>
-                                                <option value="No">No</option>
+                                                <option value="No" selected>No</option>
                                                 <option value="No internet service">No internet service</option>
                                             </select>
                                         </div>
@@ -147,7 +155,7 @@
                                             <label class="form-label">Streaming TV</label>
                                             <select class="form-select" name="StreamingTV" required>
                                                 <option value="">Select...</option>
-                                                <option value="Yes">Yes</option>
+                                                <option value="Yes" selected>Yes</option>
                                                 <option value="No">No</option>
                                                 <option value="No internet service">No internet service</option>
                                             </select>
@@ -202,6 +210,7 @@
                         <i class="fas fa-handshake fa-3x text-muted mb-3"></i>
                         <h5>Welcome to Churn Predictor</h5>
                         <p class="text-muted">Fill out the customer information and click "Predict Churn Risk" to get started.</p>
+                        <small class="text-muted">Sample data is pre-filled for testing</small>
                     </div>
                 </div>
             </div>
@@ -261,7 +270,7 @@
                     </h4>
                     <hr>
                     <p class="mb-1"><strong>Churn Probability:</strong></p>
-                    <div class="progress mb-2" style="height: 25px;">
+                    <div class="progress mb-2">
                         <div class="progress-bar bg-${prediction.risk_color}" 
                              role="progressbar" 
                              style="width: ${prediction.churn_probability}%"
@@ -308,30 +317,8 @@
             document.getElementById('results').style.display = 'block';
         }
         
-        // Populate form with sample data for testing
-        function fillSampleData() {
-            const sampleData = {
-                'tenure': '12',
-                'MonthlyCharges': '70.35',
-                'TotalCharges': '844.20',
-                'gender': 'Male',
-                'Contract': 'Month-to-month',
-                'InternetService': 'Fiber optic',
-                'PaymentMethod': 'Electronic check',
-                'PaperlessBilling': 'Yes',
-                'OnlineSecurity': 'No',
-                'TechSupport': 'No',
-                'StreamingTV': 'Yes'
-            };
-            
-            for (const [key, value] of Object.entries(sampleData)) {
-                const element = document.querySelector(`[name="${key}"]`);
-                if (element) element.value = value;
-            }
-        }
-        
-        // Uncomment the line below to enable sample data filling for testing
-        // fillSampleData();
+        // Show welcome message initially
+        document.getElementById('welcomeMessage').style.display = 'block';
     </script>
 </body>
 </html>

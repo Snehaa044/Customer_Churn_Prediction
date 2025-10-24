@@ -1,0 +1,54 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+}
+
+.risk-low { 
+    color: #198754; 
+    font-weight: bold;
+}
+.risk-medium { 
+    color: #ffc107; 
+    font-weight: bold;
+}
+.risk-high { 
+    color: #fd7e14; 
+    font-weight: bold;
+}
+.risk-very-high { 
+    color: #dc3545; 
+    font-weight: bold;
+}
+
+.feature-card {
+    transition: transform 0.2s;
+}
+.feature-card:hover {
+    transform: translateY(-2px);
+}
+
+.recommendation-item {
+    border-left: 4px solid #0d6efd;
+    padding-left: 1rem;
+    margin-bottom: 0.5rem;
+    background-color: #f8f9fa;
+    padding: 10px;
+    border-radius: 0 5px 5px 0;
+}
+
+.loading {
+    display: none;
+}
+
+.progress {
+    height: 25px;
+}
+
+.card {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    border: 1px solid rgba(0, 0, 0, 0.125);
+}
+
+.card-header {
+    font-weight: 600;
+}

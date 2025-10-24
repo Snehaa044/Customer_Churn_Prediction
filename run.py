@@ -1,30 +1,23 @@
 from app import create_app
 import os
 
-# Create Flask application
-app = create_app()
-
 def check_dependencies():
-    """Check if all required files and models exist"""
-    required_files = [
-        'data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv',
+    """Check if we have the basic requirements"""
+    # Check for dataset
+    if not os.path.exists('data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv'):
+        print("❌ Dataset not found. Please download from Kaggle and place in data/raw/")
+        return False
+    
+    # Check for any model
+    model_files = [
         'models/best_churn_model.pkl',
-        'models/feature_preprocessor.pkl'
+        'models/quick_churn_model.pkl'
     ]
     
-    missing_files = []
-    for file in required_files:
-        if not os.path.exists(file):
-            missing_files.append(file)
-    
-    if missing_files:
-        print("❌ MISSING REQUIRED FILES:")
-        for file in missing_files:
-            print(f"   - {file}")
-        print("\n💡 Please run the training pipeline first:")
-        print("   python src/data_analysis.py")
-        print("   python src/feature_engineering.py") 
-        print("   python src/model_training.py")
+    has_model = any(os.path.exists(model_file) for model_file in model_files)
+    if not has_model:
+        print("❌ No trained model found.")
+        print("💡 Please run: python src/quick_train.py")
         return False
     
     return True
@@ -40,7 +33,8 @@ if __name__ == '__main__':
         print("📍 Application available at: http://localhost:5000")
         print("🛑 Press Ctrl+C to stop the server")
         
-        # Run the application
+        # Create and run the application
+        app = create_app()
         app.run(debug=True, host='0.0.0.0', port=5000)
     else:
         print("❌ Application cannot start due to missing files")
