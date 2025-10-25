@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import os
+import traceback
 
 main = Blueprint('main', __name__)
 
@@ -10,18 +11,20 @@ main = Blueprint('main', __name__)
 try:
     model = joblib.load('models/best_churn_model.pkl')
     print("✅ Loaded best_churn_model.pkl")
-except:
+except Exception as e:
+    print(f"❌ Error loading best_churn_model.pkl: {e}")
     try:
         model = joblib.load('models/quick_churn_model.pkl')
         print("✅ Loaded quick_churn_model.pkl")
-    except:
-        print("❌ No model found")
+    except Exception as e:
+        print(f"❌ Error loading quick_churn_model.pkl: {e}")
         model = None
 
 try:
     model_comparison = joblib.load('models/model_comparison_results.pkl')
     print("✅ Loaded model_comparison_results.pkl")
-except:
+except Exception as e:
+    print(f"❌ Error loading model_comparison_results.pkl: {e}")
     model_comparison = {'best_model_name': 'Random Forest', 'best_score': 0.85}
     print("ℹ️ Using default model info")
 
@@ -45,15 +48,31 @@ def predict_churn():
         }), 503
     
     try:
+        print("📥 Received prediction request...")
+        
         # Get form data
         form_data = request.form.to_dict()
+        print(f"Form data: {form_data}")
+        
+        # Check required fields
+        required_fields = ['tenure', 'MonthlyCharges', 'TotalCharges', 'Contract', 'InternetService']
+        missing_fields = [field for field in required_fields if field not in form_data]
+        
+        if missing_fields:
+            return jsonify({
+                'success': False,
+                'error': f'Missing required fields: {missing_fields}'
+            }), 400
         
         # Preprocess the input
         processed_data = preprocess_customer_data(form_data)
+        print(f"Processed data shape: {processed_data.shape}")
         
         # Make prediction
         churn_probability = model.predict_proba(processed_data)[0, 1]
         churn_prediction = model.predict(processed_data)[0]
+        
+        print(f"Prediction - Probability: {churn_probability:.4f}, Class: {churn_prediction}")
         
         # Interpret results
         if churn_probability > 0.7:
@@ -88,6 +107,8 @@ def predict_churn():
         })
         
     except Exception as e:
+        print(f"❌ Prediction error: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
         return jsonify({
             'success': False,
             'error': f'Prediction error: {str(e)}'
@@ -98,79 +119,181 @@ def health_check():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'model_loaded': model is not None
+        'model_loaded': model is not None,
+        'model_name': model_comparison.get('best_model_name', 'Unknown')
     })
+
+@main.route('/debug')
+def debug_info():
+    """Debug endpoint to check model and feature information"""
+    debug_info = {
+        'model_loaded': model is not None,
+        'model_type': type(model).__name__ if model else 'None',
+        'model_features': len(model.feature_importances_) if model and hasattr(model, 'feature_importances_') else 0,
+        'expected_features_sample': []
+    }
+    
+    if model and hasattr(model, 'feature_importances_'):
+        debug_info['expected_features_sample'] = [f'feature_{i}' for i in range(min(10, len(model.feature_importances_)))]
+    
+    return jsonify(debug_info)
+
+@main.route('/test')
+def test_prediction():
+    """Test endpoint with sample data"""
+    if model is None:
+        return jsonify({'error': 'Model not loaded'}), 503
+    
+    # Sample test data
+    test_data = {
+        'tenure': '12',
+        'MonthlyCharges': '70.35', 
+        'TotalCharges': '844.20',
+        'gender': 'Male',
+        'Partner': 'Yes',
+        'Dependents': 'No',
+        'PhoneService': 'Yes',
+        'MultipleLines': 'No',
+        'InternetService': 'Fiber optic',
+        'OnlineSecurity': 'No',
+        'OnlineBackup': 'No', 
+        'DeviceProtection': 'No',
+        'TechSupport': 'No',
+        'StreamingTV': 'Yes',
+        'StreamingMovies': 'No',
+        'Contract': 'Month-to-month',
+        'PaperlessBilling': 'Yes',
+        'PaymentMethod': 'Electronic check'
+    }
+    
+    try:
+        processed_data = preprocess_customer_data(test_data)
+        churn_probability = model.predict_proba(processed_data)[0, 1]
+        
+        return jsonify({
+            'success': True,
+            'test_prediction': f'Churn probability: {churn_probability:.4f}',
+            'processed_features': processed_data.shape[1]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 def preprocess_customer_data(input_data):
     """Preprocess single customer data for prediction"""
-    # Create DataFrame
-    df = pd.DataFrame([input_data])
-    
-    # Convert to appropriate data types
-    df['tenure'] = pd.to_numeric(df['tenure'], errors='coerce').fillna(0).astype(int)
-    df['MonthlyCharges'] = pd.to_numeric(df['MonthlyCharges'], errors='coerce').fillna(0)
-    df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce').fillna(0)
-    
-    # Basic feature engineering
-    df['value_ratio'] = df['MonthlyCharges'] / (df['TotalCharges'] + 1)
-    df['is_new_customer'] = (df['tenure'] <= 3).astype(int)
-    df['is_loyal_customer'] = (df['tenure'] > 24).astype(int)
-    
-    # Service count
-    service_columns = ['OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 
-                      'TechSupport', 'StreamingTV', 'StreamingMovies']
-    
-    for col in service_columns:
-        if col in df.columns:
-            df[col] = df[col].map({'Yes': 1, 'No': 0, 'No internet service': 0})
-    
-    df['total_services'] = df[service_columns].sum(axis=1)
-    
-    # Binary encoding
-    binary_mappings = {
-        'gender': {'Female': 1, 'Male': 0},
-        'Partner': {'Yes': 1, 'No': 0},
-        'Dependents': {'Yes': 1, 'No': 0},
-        'PhoneService': {'Yes': 1, 'No': 0},
-        'PaperlessBilling': {'Yes': 1, 'No': 0}
-    }
-    
-    for col, mapping in binary_mappings.items():
-        if col in df.columns:
-            df[col] = df[col].map(mapping)
-    
-    # One-hot encoding for critical features
-    if 'Contract' in df.columns:
-        contract_dummies = pd.get_dummies(df['Contract'], prefix='Contract')
-        df = pd.concat([df, contract_dummies], axis=1)
-    
-    if 'InternetService' in df.columns:
-        internet_dummies = pd.get_dummies(df['InternetService'], prefix='InternetService')
-        df = pd.concat([df, internet_dummies], axis=1)
-    
-    if 'PaymentMethod' in df.columns:
-        payment_dummies = pd.get_dummies(df['PaymentMethod'], prefix='PaymentMethod')
-        df = pd.concat([df, payment_dummies], axis=1)
-    
-    # Ensure we have all expected features
-    expected_features = [
-        'tenure', 'MonthlyCharges', 'TotalCharges', 'value_ratio', 
-        'is_new_customer', 'is_loyal_customer', 'total_services',
-        'gender', 'Partner', 'Dependents', 'PhoneService', 'PaperlessBilling',
-        'Contract_Month-to-month', 'Contract_One year', 'Contract_Two year',
-        'InternetService_DSL', 'InternetService_Fiber optic', 'InternetService_No',
-        'PaymentMethod_Bank transfer', 'PaymentMethod_Credit card', 
-        'PaymentMethod_Electronic check', 'PaymentMethod_Mailed check'
-    ]
-    
-    for feature in expected_features:
-        if feature not in df.columns:
-            df[feature] = 0
-    
-    # Select only the features we need
-    df = df[expected_features]
-    
-    return df
+    try:
+        print("🔄 Starting data preprocessing...")
+        
+        # Create DataFrame
+        df = pd.DataFrame([input_data])
+        print(f"Input DataFrame shape: {df.shape}")
+        print(f"Input columns: {list(df.columns)}")
+        
+        # Convert to appropriate data types with proper error handling
+        df['tenure'] = pd.to_numeric(df['tenure'], errors='coerce')
+        df['MonthlyCharges'] = pd.to_numeric(df['MonthlyCharges'], errors='coerce')
+        df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+        
+        # Fill NaN values before converting to int
+        df['tenure'] = df['tenure'].fillna(0).astype(int)
+        df['MonthlyCharges'] = df['MonthlyCharges'].fillna(0)
+        df['TotalCharges'] = df['TotalCharges'].fillna(0)
+        
+        print(f"After numeric conversion - Tenure: {df['tenure'].iloc[0]}, Monthly: {df['MonthlyCharges'].iloc[0]}, Total: {df['TotalCharges'].iloc[0]}")
+        
+        # Basic feature engineering
+        df['value_ratio'] = df['MonthlyCharges'] / (df['TotalCharges'].replace(0, 1) + 1)  # Avoid division by zero
+        df['is_new_customer'] = (df['tenure'] <= 3).astype(int)
+        df['is_loyal_customer'] = (df['tenure'] > 24).astype(int)
+        
+        # Service count - handle missing columns gracefully
+        service_columns = ['OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 
+                          'TechSupport', 'StreamingTV', 'StreamingMovies']
+        
+        for col in service_columns:
+            if col in df.columns:
+                df[col] = df[col].map({'Yes': 1, 'No': 0, 'No internet service': 0})
+            else:
+                df[col] = 0  # Default value if column missing
+        
+        df['total_services'] = df[service_columns].sum(axis=1)
+        
+        # Binary encoding with default values
+        binary_mappings = {
+            'gender': {'Female': 1, 'Male': 0},
+            'Partner': {'Yes': 1, 'No': 0},
+            'Dependents': {'Yes': 1, 'No': 0},
+            'PhoneService': {'Yes': 1, 'No': 0},
+            'PaperlessBilling': {'Yes': 1, 'No': 0}
+        }
+        
+        for col, mapping in binary_mappings.items():
+            if col in df.columns:
+                df[col] = df[col].map(mapping)
+            else:
+                df[col] = 0  # Default value
+        
+        # One-hot encoding for categorical features
+        categorical_columns = ['MultipleLines', 'InternetService', 'Contract', 'PaymentMethod']
+        
+        for col in categorical_columns:
+            if col in df.columns:
+                # Get unique values and create dummies
+                dummies = pd.get_dummies(df[col], prefix=col)
+                df = pd.concat([df, dummies], axis=1)
+        
+        # Drop original categorical columns if they exist
+        df = df.drop(categorical_columns, axis=1, errors='ignore')
+        
+        print(f"After encoding: {df.shape[1]} features")
+        
+        # Get the feature names that the model expects
+        # First, try to get from the preprocessor if available
+        try:
+            preprocessor = joblib.load('models/feature_preprocessor.pkl')
+            expected_features = preprocessor.get('feature_names', [])
+            print(f"Loaded expected features from preprocessor: {len(expected_features)}")
+        except:
+            # Fallback: get from model or create default list
+            if hasattr(model, 'feature_importances_'):
+                expected_features = [f'feature_{i}' for i in range(len(model.feature_importances_))]
+            else:
+                # Comprehensive fallback feature list
+                expected_features = [
+                    'tenure', 'MonthlyCharges', 'TotalCharges', 'value_ratio', 
+                    'is_new_customer', 'is_loyal_customer', 'total_services',
+                    'gender', 'Partner', 'Dependents', 'PhoneService', 'PaperlessBilling',
+                    'MultipleLines_No', 'MultipleLines_No phone service', 'MultipleLines_Yes',
+                    'InternetService_DSL', 'InternetService_Fiber optic', 'InternetService_No',
+                    'Contract_Month-to-month', 'Contract_One year', 'Contract_Two year',
+                    'PaymentMethod_Bank transfer (automatic)', 'PaymentMethod_Credit card (automatic)', 
+                    'PaymentMethod_Electronic check', 'PaymentMethod_Mailed check'
+                ]
+            print(f"Using fallback features: {len(expected_features)}")
+        
+        # Ensure we have all expected features
+        missing_features = []
+        for feature in expected_features:
+            if feature not in df.columns:
+                df[feature] = 0
+                missing_features.append(feature)
+        
+        if missing_features:
+            print(f"Added {len(missing_features)} missing features")
+        
+        # Select only the expected features (in correct order)
+        df = df[expected_features]
+        
+        print(f"✅ Final processed data shape: {df.shape}")
+        print(f"First few features: {list(df.columns[:10])}")
+        
+        return df
+        
+    except Exception as e:
+        print(f"❌ Preprocessing error: {e}")
+        print(f"Error type: {type(e).__name__}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        raise e
 
 def generate_business_recommendations(customer_data, churn_prob):
     """Generate actionable business recommendations"""
